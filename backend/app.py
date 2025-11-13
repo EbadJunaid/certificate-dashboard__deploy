@@ -14,7 +14,7 @@ app = FastAPI(title="Certificate Analytics API", description="API for certificat
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://certificate-dashboard-deploy.netlify.app/"],
+    allow_origins=["https://certificate-dashboard-deploy.netlify.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
