@@ -25,7 +25,7 @@ MONGO_URI = os.getenv("MONGO_URI")
 if not MONGO_URI:
     raise RuntimeError("MONGO_URI not found in environment variables. Please set it in the .env file.")
 
-DB_NAME = os.getenv("DB_NAME", "my-pk-domains-multi")  # Default to original if not set
+DB_NAME = os.getenv("DB_NAME", "my-pk-domains-multi-mini")  # Default to original if not set
 
 try:
     client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=10000)
