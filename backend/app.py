@@ -28,7 +28,7 @@ if not MONGO_URI:
 DB_NAME = os.getenv("DB_NAME", "my-pk-domains-multi")  # Default to original if not set
 
 try:
-    client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+    client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=10000)
     client.server_info()  # Force connection to verify
     db = client[DB_NAME]
     certificates_collection = db["certificates"]
