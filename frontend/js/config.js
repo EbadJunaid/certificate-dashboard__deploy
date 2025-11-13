@@ -3,7 +3,7 @@
  */
 const CONFIG = {
   // API Endpoints
-  API_BASE_URL: "http://localhost:8000",
+  API_BASE_URL: "https://certificate-dashboard-deploy.onrender.com",
   API_ENDPOINTS: {
     OVERVIEW: "/api/overview",
     CERTIFICATES: "/api/certificates",
