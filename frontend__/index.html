@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Certificate Analytics Dashboard</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%231976d2'/%3E%3Cpath d='M30 25 L50 15 L70 25 L70 45 L50 55 L30 45 Z' fill='%23fff' opacity='0.9'/%3E%3Cpath d='M30 55 L50 45 L70 55 L70 75 L50 85 L30 75 Z' fill='%23fff' opacity='0.7'/%3E%3Ccircle cx='50' cy='40' r='8' fill='%231976d2'/%3E%3C/svg%3E" />
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css"
+    />
+    <link rel="stylesheet" href="css/styles.css" />
+  </head>
+  <body class="bg-light">
+    <!-- Page Loader -->
+    <div class="page-loader" id="pageLoader">
+      <div class="blob-loader"></div>
+    </div>
+
+    <div class="container-fluid">
+      <div class="row">
+        <!-- Sidebar -->
+        <div class="col-md-3 col-xl-2 px-0 bg-white sidebar">
+          <div class="d-flex flex-column p-3 sidebar-content">
+            <div class="mb-4 px-3">
+              <h4 class="fw-bold text-primary">Certificate Analytics</h4>
+            </div>
+            <ul class="nav nav-pills flex-column mb-auto" id="dashboard-nav">
+              <li class="nav-item mb-1">
+                <a
+                  href="#overview"
+                  class="nav-link active"
+                  data-view="overview"
+                >
+                  <i class="bi bi-grid-1x2"></i> Overview
+                </a>
+              </li>
+              <li class="nav-item mb-1">
+                <a
+                  href="#active-expired"
+                  class="nav-link"
+                  data-view="active-expired"
+                >
+                  <i class="bi bi-check2-circle"></i> Active vs Expired
+                </a>
+              </li>
+              <li class="nav-item mb-1">
+                <a
+                  href="#type-distribution"
+                  class="nav-link"
+                  data-view="type-distribution"
+                >
+                  <i class="bi bi-pie-chart"></i> Type Distribution
+                </a>
+              </li>
+              <li class="nav-item mb-1">
+                <a
+                  href="#issuance-timeline"
+                  class="nav-link"
+                  data-view="issuance-timeline"
+                >
+                  <i class="bi bi-graph-up"></i> Issuance Timeline
+                </a>
+              </li>
+              <li class="nav-item mb-1">
+                <a href="#top-issuers" class="nav-link" data-view="top-issuers">
+                  <i class="bi bi-award"></i> Top Issuers
+                </a>
+              </li>
+              <li class="nav-item mb-1">
+                <a
+                  href="#expiring-soon"
+                  class="nav-link"
+                  data-view="expiring-soon"
+                >
+                  <i class="bi bi-exclamation-triangle"></i> Expiring Soon
+                </a>
+              </li>
+              <li class="nav-item mb-1">
+                <a
+                  href="#region-breakdown"
+                  class="nav-link"
+                  data-view="region-breakdown"
+                >
+                  <i class="bi bi-globe"></i> Region Breakdown
+                </a>
+              </li>
+              <li class="nav-item mb-1">
+                <a
+                  href="#department-distribution"
+                  class="nav-link"
+                  data-view="department-distribution"
+                >
+                  <i class="bi bi-building"></i> Department Distribution
+                </a>
+              </li>
+              <li class="nav-item mb-1">
+                <a
+                  href="#ml-predictions"
+                  class="nav-link"
+                  data-view="ml-predictions"
+                >
+                  <i class="bi bi-lightning"></i> ML Predictions
+                </a>
+              </li>
+              <li class="nav-item mb-1">
+                <a
+                  href="#anomaly-detection"
+                  class="nav-link"
+                  data-view="anomaly-detection"
+                >
+                  <i class="bi bi-bug"></i> Anomaly Detection
+                </a>
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="col-md-9 col-xl-10 ms-auto px-4 py-3 main-content">
+          <!-- Placeholder for different views -->
+          <div id="dashboard-content">
+            <!-- Views will be loaded here dynamically -->
+            <!-- Each view is defined in separate template files -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modals -->
+    <!-- Certificate Details Modal -->
+    <div
+      class="modal fade"
+      id="certificateDetailsModal"
+      tabindex="-1"
+      aria-hidden="true"
+    >
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">Certificate Details</h5>
+            <button
+              type="button"
+              class="btn-close"
+              data-bs-dismiss="modal"
+              aria-label="Close"
+            ></button>
+          </div>
+          <div class="modal-body" id="certificateDetailsContent">
+            <!-- Certificate details will be loaded here dynamically -->
+          </div>
+          <div class="modal-footer">
+            <button
+              type="button"
+              class="btn btn-secondary"
+              data-bs-dismiss="modal"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ML Predictions Modal -->
+    <div
+      class="modal fade"
+      id="mlPredictionsModal"
+      tabindex="-1"
+      aria-hidden="true"
+    >
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <div class="modal-header bg-primary text-white">
+            <h5 class="modal-title">ML Prediction Results</h5>
+            <button
+              type="button"
+              class="btn-close btn-close-white"
+              data-bs-dismiss="modal"
+              aria-label="Close"
+            ></button>
+          </div>
+          <div class="modal-body" id="mlPredictionsContent">
+            <!-- ML prediction results will be loaded here dynamically -->
+          </div>
+          <div class="modal-footer">
+            <button
+              type="button"
+              class="btn btn-secondary"
+              data-bs-dismiss="modal"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Anomaly Detection Modal -->
+    <div class="modal fade" id="anomalyModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <div class="modal-header bg-warning">
+            <h5 class="modal-title">Anomaly Detection Results</h5>
+            <button
+              type="button"
+              class="btn-close"
+              data-bs-dismiss="modal"
+              aria-label="Close"
+            ></button>
+          </div>
+          <div class="modal-body" id="anomalyContent">
+            <!-- Anomaly detection results will be loaded here dynamically -->
+          </div>
+          <div class="modal-footer">
+            <button
+              type="button"
+              class="btn btn-secondary"
+              data-bs-dismiss="modal"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- JavaScript Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+
+    <!-- App JS -->
+    <script src="js/config.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/charts.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/views.js"></script>
+    <script src="js/app.js"></script>
+  </body>
+</html>

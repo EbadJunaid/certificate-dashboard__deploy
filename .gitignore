@@ -1,0 +1,9 @@
+.vscode/
+.DS_Store
+backend/__pycache__/
+backend/.env
+frontend__/*md
+!frontend__/README.md
+*.pyc
+*.log
+mongo.txt

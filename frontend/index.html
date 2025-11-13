@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Certificate Analytics Dashboard</title>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css"
+    />
+    <link rel="stylesheet" href="css/styles.css" />
+  </head>
+  <body class="bg-light">
+    <div class="container-fluid">
+      <div class="row">
+        <!-- Sidebar -->
+        <div class="col-md-3 col-xl-2 px-0 bg-white sidebar">
+          <div class="d-flex flex-column p-3 sidebar-content">
+            <div class="mb-4 px-3">
+              <h4 class="fw-bold text-primary">Certificate Analytics</h4>
+            </div>
+            <ul class="nav nav-pills flex-column mb-auto" id="dashboard-nav">
+              <li class="nav-item mb-1">
+                <a
+                  href="#overview"
+                  class="nav-link active"
+                  data-view="overview"
+                >
+                  <i class="bi bi-grid-1x2"></i> Overview
+                </a>
+              </li>
+              <li class="nav-item mb-1">
+                <a
+                  href="#active-expired"
+                  class="nav-link"
+                  data-view="active-expired"
+                >
+                  <i class="bi bi-check2-circle"></i> Active vs Expired
+                </a>
+              </li>
+              <li class="nav-item mb-1">
+                <a
+                  href="#validity-analytics"
+                  class="nav-link"
+                  data-view="validity-analytics"
+                >
+                  <i class="bi bi-calendar-check"></i> Validity Analytics
+                </a>
+              </li>
+              <li class="nav-item mb-1">
+                <a
+                  href="#signature-analytics"
+                  class="nav-link"
+                  data-view="signature-analytics"
+                >
+                  <i class="bi bi-shield-lock"></i> Signature & Hash
+                </a>
+              </li>
+              <li class="nav-item mb-1">
+                <a
+                  href="#ca-analytics"
+                  class="nav-link"
+                  data-view="ca-analytics"
+                >
+                  <i class="bi bi-building"></i> CA Analytics
+                </a>
+              </li>
+              <li class="nav-item mb-1">
+                <a
+                  href="#san-analytics"
+                  class="nav-link"
+                  data-view="san-analytics"
+                >
+                  <i class="bi bi-list-ul"></i> SAN Analytics
+                </a>
+              </li>
+              <li class="nav-item mb-1">
+                <a
+                  href="#trends-analytics"
+                  class="nav-link"
+                  data-view="trends-analytics"
+                >
+                  <i class="bi bi-bar-chart-line"></i> Trends
+                </a>
+              </li>
+              <li class="nav-item mb-1">
+                <a
+                  href="#type-distribution"
+                  class="nav-link"
+                  data-view="type-distribution"
+                >
+                  <i class="bi bi-pie-chart"></i> Type Distribution
+                </a>
+              </li>
+              <!-- New navigation items -->
+              <li class="nav-item mb-1">
+                <a
+                  href="#issuer-organization"
+                  class="nav-link"
+                  data-view="issuer-organization"
+                >
+                  <i class="bi bi-building-fill"></i> Issuer Organizations
+                </a>
+              </li>
+
+              <li class="nav-item mb-1">
+                <a
+                  href="#issuer-country"
+                  class="nav-link"
+                  data-view="issuer-country"
+                >
+                  <i class="bi bi-globe-americas"></i> Issuer Countries
+                </a>
+              </li>
+
+              <li class="nav-item mb-1">
+                <a
+                  href="#subject-names"
+                  class="nav-link"
+                  data-view="subject-names"
+                >
+                  <i class="bi bi-person-badge"></i> Subject Names
+                </a>
+              </li>
+              <li class="nav-item mb-1">
+                <a href="#ca-domain" class="nav-link" data-view="ca-domain">
+                  <i class="bi bi-diagram-3"></i> CAs vs Domains
+                </a>
+              </li>
+              <li class="nav-item mb-1">
+                <a href="#ca-url" class="nav-link" data-view="ca-url">
+                  <i class="bi bi-link-45deg"></i> CAs vs URLs
+                </a>
+              </li>
+              <li class="nav-item mb-1">
+                <a href="#ca-pubkey" class="nav-link" data-view="ca-pubkey">
+                  <i class="bi bi-key"></i> CAs vs Public Keys
+                </a>
+              </li>
+              <li class="nav-item mb-1">
+                <a
+                  href="#shared-pubkeys"
+                  class="nav-link"
+                  data-view="shared-pubkeys"
+                >
+                  <i class="bi bi-key-fill"></i> Shared Public Keys
+                </a>
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="col-md-9 col-xl-10 ms-auto px-4 py-3 main-content">
+          <!-- Placeholder for different views -->
+          <div id="dashboard-content">
+            <!-- Views will be loaded here dynamically -->
+            <!-- Each view is defined in separate template files -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Blob Page Loader -->
+    <div class="blob-loader-container" id="blob-loader" style="display: none">
+      <div class="blob-loader">
+        <div class="blob"></div>
+        <div class="blob"></div>
+        <div class="blob"></div>
+      </div>
+    </div>
+
+    <!-- Modals -->
+    <!-- Certificate Details Modal -->
+    <div
+      class="modal fade"
+      id="certificateDetailsModal"
+      tabindex="-1"
+      aria-hidden="true"
+    >
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">Certificate Details</h5>
+            <button
+              type="button"
+              class="btn-close"
+              data-bs-dismiss="modal"
+              aria-label="Close"
+            ></button>
+          </div>
+          <div class="modal-body" id="certificateDetailsContent">
+            <!-- Certificate details will be loaded here dynamically -->
+          </div>
+          <div class="modal-footer">
+            <button
+              type="button"
+              class="btn btn-secondary"
+              data-bs-dismiss="modal"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ML Predictions Modal -->
+    <div
+      class="modal fade"
+      id="mlPredictionsModal"
+      tabindex="-1"
+      aria-hidden="true"
+    >
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <div class="modal-header bg-primary text-white">
+            <h5 class="modal-title">ML Prediction Results</h5>
+            <button
+              type="button"
+              class="btn-close btn-close-white"
+              data-bs-dismiss="modal"
+              aria-label="Close"
+            ></button>
+          </div>
+          <div class="modal-body" id="mlPredictionsContent">
+            <!-- ML prediction results will be loaded here dynamically -->
+          </div>
+          <div class="modal-footer">
+            <button
+              type="button"
+              class="btn btn-secondary"
+              data-bs-dismiss="modal"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Anomaly Detection Modal -->
+    <div class="modal fade" id="anomalyModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <div class="modal-header bg-warning">
+            <h5 class="modal-title">Anomaly Detection Results</h5>
+            <button
+              type="button"
+              class="btn-close"
+              data-bs-dismiss="modal"
+              aria-label="Close"
+            ></button>
+          </div>
+          <div class="modal-body" id="anomalyContent">
+            <!-- Anomaly detection results will be loaded here dynamically -->
+          </div>
+          <div class="modal-footer">
+            <button
+              type="button"
+              class="btn btn-secondary"
+              data-bs-dismiss="modal"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- JavaScript Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+
+    <!-- App JS -->
+    <script src="js/config.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/charts.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/views.js"></script>
+    <script src="js/app.js"></script>
+  </body>
+</html>
