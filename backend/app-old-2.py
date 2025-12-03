@@ -35,32 +35,18 @@ try:
 except errors.ServerSelectionTimeoutError as err:
     raise RuntimeError("Could not connect to MongoDB: " + str(err))
 
-# --- Helper for standard projections ---
-# Defines the minimal fields needed for certificate listing to save memory
-BASIC_CERT_PROJECTION = {
-    "_id": 0,
-    "certificate_id": 1,
-    "name": 1,
-    "parsed.subject.common_name": 1,
-    "parsed.issuer.common_name": 1,
-    "parsed.issuer.organization": 1,
-    "parsed.validity.start": 1,
-    "parsed.validity.end": 1,
-    "parsed.serial_number": 1,
-    "parsed.signature_algorithm.name": 1
-}
-
 @app.get("/")
 def read_root():
     return {"message": "Certificate Analytics API", "version": "1.0"}
 
+# New debug endpoint to fetch and return the first few documents
 @app.get("/api/debug/first_docs")
 def get_first_docs(limit: int = 5):
     """
-    Debug endpoint to return the first N documents.
-    Optimized to fetch only essential fields for inspection.
+    Debug endpoint to return the first N documents from the collection.
+    Use this to verify the collection contents and structure.
     """
-    docs = list(certificates_collection.find({}, BASIC_CERT_PROJECTION).limit(limit))
+    docs = list(certificates_collection.find({}, {"_id": 0}).limit(limit))
     total_count = certificates_collection.count_documents({})
     return {
         "db_name": DB_NAME,
@@ -74,7 +60,6 @@ def get_overview():
     now = datetime.utcnow().isoformat()
     soon = (datetime.utcnow() + timedelta(days=30)).isoformat()
 
-    # count_documents is already efficient as it runs on the DB index if available
     total = certificates_collection.count_documents({})
     active = certificates_collection.count_documents({"parsed.validity.end": {"$gt": now}})
     expired = certificates_collection.count_documents({"parsed.validity.end": {"$lt": now}})
@@ -100,40 +85,36 @@ def get_overview():
     }
 
 @app.get("/api/certificates")
+# def get_certificates():
+#     certs = list(certificates_collection.find({}, {"_id": 0}))
+#     for cert in certs:
+#         cert["issue_date"] = cert.get("parsed", {}).get("validity", {}).get("start")
+#         cert["expiry_date"] = cert.get("parsed", {}).get("validity", {}).get("end")
+#     return certs
+
 def get_certificates():
-    # Only fetch fields necessary for display
-    certs = list(certificates_collection.find({}, BASIC_CERT_PROJECTION).limit(1000)) # Added safety limit
-    
-    # Flatten structure slightly for frontend convenience
+    projection = {
+        "_id": 0, 
+        "parsed.validity.start": 1, 
+        "parsed.validity.end": 1
+    }
+    certs = list(certificates_collection.find({}, projection))
     for cert in certs:
-        parsed = cert.get("parsed", {})
-        validity = parsed.get("validity", {})
-        cert["issue_date"] = validity.get("start")
-        cert["expiry_date"] = validity.get("end")
-        
-        # Populate common top-level fields if they are missing but exist in parsed
-        if "name" not in cert:
-             cert["name"] = parsed.get("subject", {}).get("common_name", "Unknown")
-             
+        cert["issue_date"] = cert.get("parsed", {}).get("validity", {}).get("start")
+        cert["expiry_date"] = cert.get("parsed", {}).get("validity", {}).get("end")
     return certs
 
 @app.get("/api/certificates/active")
-def get_active_certificates():
-    now = datetime.utcnow().isoformat()
-    # Projection reduces payload size significantly
-    certs = list(certificates_collection.find(
-        {"parsed.validity.end": {"$gt": now}}, 
-        BASIC_CERT_PROJECTION
-    ).limit(1000))
-    return certs
+# def get_active_certificates():
+#     now = datetime.utcnow().isoformat()
+#     certs = list(certificates_collection.find({"parsed.validity.end": {"$gt": now}}, {"_id": 0}))
+#     return certs
+
 
 @app.get("/api/certificates/expired")
 def get_expired_certificates():
     now = datetime.utcnow().isoformat()
-    certs = list(certificates_collection.find(
-        {"parsed.validity.end": {"$lt": now}}, 
-        BASIC_CERT_PROJECTION
-    ).limit(1000))
+    certs = list(certificates_collection.find({"parsed.validity.end": {"$lt": now}}, {"_id": 0}))
     return certs
 
 @app.get("/api/types")
@@ -146,42 +127,38 @@ def get_certificate_types():
 
 @app.get("/api/timeline")
 def get_issuance_timeline():
-    """
-    Optimized: Uses MongoDB aggregation to group dates instead of fetching all dates to Python.
-    """
+
     try:
-        pipeline = [
-            {"$match": {"parsed.validity.start": {"$exists": True}}},
-            # Convert string date to Date object
-            {"$project": {
-                "date": {"$toDate": "$parsed.validity.start"}
-            }},
-            # Group by Year-Month
-            {"$group": {
-                "_id": {
-                    "year": {"$year": "$date"},
-                    "month": {"$month": "$date"}
-                },
-                "count": {"$sum": 1}
-            }},
-            {"$sort": {"_id.year": 1, "_id.month": 1}}
+        # Fetch only the start dates to limit bandwidth
+        cursor = certificates_collection.find(
+            {"parsed.validity.start": {"$exists": True}},
+            {"_id": 0, "parsed.validity.start": 1}
+        )
+
+        counts = {}
+        for doc in cursor:
+            start = doc.get("parsed", {}).get("validity", {}).get("start")
+            if not start:
+                continue
+            # Normalize common ISO format with trailing Z
+            try:
+                dt = datetime.fromisoformat(start.replace("Z", ""))
+            except Exception:
+                # Skip malformed date strings
+                continue
+
+            key = (dt.year, dt.month)
+            counts[key] = counts.get(key, 0) + 1
+
+        # Build sorted timeline list
+        timeline = [
+            {"date": f"{year}-{month:02d}-01", "count": counts[(year, month)]}
+            for (year, month) in sorted(counts.keys())
         ]
-        
-        results = list(certificates_collection.aggregate(pipeline))
-        
-        timeline = []
-        for item in results:
-            year = item["_id"]["year"]
-            month = item["_id"]["month"]
-            # Handle potential nulls from invalid dates
-            if year and month:
-                timeline.append({
-                    "date": f"{year}-{month:02d}-01", 
-                    "count": item["count"]
-                })
 
         return {"timeline": timeline}
     except Exception as e:
+        # Provide a clearer error message in the response for debugging
         raise HTTPException(status_code=500, detail=f"Error building timeline: {e}")
 
 @app.get("/api/issuers")
@@ -196,30 +173,11 @@ def get_top_issuers():
 def get_expiring_certificates():
     now = datetime.utcnow().isoformat()
     soon = (datetime.utcnow() + timedelta(days=30)).isoformat()
-    
-    # Fetch ONLY fields needed for expiry calculation
-    projection = {
-        "_id": 0, 
-        "name": 1,
-        "parsed.subject.common_name": 1,
-        "parsed.validity.end": 1,
-        "parsed.issuer.organization": 1
-    }
-    
-    certs = list(certificates_collection.find(
-        {"parsed.validity.end": {"$gt": now, "$lt": soon}}, 
-        projection
-    ))
-    
-    # Post-process in memory (lightweight now due to projection)
+    certs = list(certificates_collection.find({"parsed.validity.end": {"$gt": now, "$lt": soon}}, {"_id": 0}))
     for cert in certs:
         expiry = cert.get("parsed", {}).get("validity", {}).get("end")
         if expiry:
-            try:
-                cert["days_remaining"] = (datetime.fromisoformat(expiry.replace("Z", "")) - datetime.utcnow()).days
-            except ValueError:
-                cert["days_remaining"] = 0
-                
+            cert["days_remaining"] = (datetime.fromisoformat(expiry.replace("Z", "")) - datetime.utcnow()).days
     return {"expiring": certs}
 
 @app.get("/api/regions")
@@ -238,87 +196,56 @@ def get_department_distribution():
     ]))
     return {"departments": departments}
 
-# Mock ML Endpoints - Optimized to use Sampling
+# Mock ML Endpoints
 @app.get("/api/ml/predict-expiry")
 def predict_expiry():
-    """
-    Optimized: Uses $sample to get random docs from DB instead of loading all docs to memory.
-    """
-    pipeline = [
-        {"$match": {"parsed.validity.end": {"$gte": datetime.utcnow().isoformat()}}}, # Only active
-        {"$sample": {"size": 100}}, # Randomly pick 100
-        {"$project": BASIC_CERT_PROJECTION} # Fetch only needed fields
-    ]
-    
-    active_certs = list(certificates_collection.aggregate(pipeline))
+    """Mock endpoint that simulates ML predictions for certificate expiry risk"""
+    # Get active certificates
+    active_certs = list(certificates_collection.find({"status": "Active"}, {"_id": 0}))
     predictions = []
     
     for cert in active_certs:
-        # Extract fields safely
-        parsed = cert.get("parsed", {})
-        validity = parsed.get("validity", {})
+        # Convert datetime objects for JSON serialization
+        cert["issue_date"] = cert["issue_date"].isoformat()
+        cert["expiry_date"] = cert["expiry_date"].isoformat()
         
-        expiry_str = validity.get("end")
-        issue_str = validity.get("start")
+        # Mock risk calculation based on various factors
+        days_until_expiry = (datetime.fromisoformat(cert["expiry_date"]) - datetime.now()).days
+        auto_renewal_factor = 0.3 if cert["auto_renewal"] else 0.7
         
-        if not expiry_str or not issue_str:
-            continue
-            
-        name = cert.get("name") or parsed.get("subject", {}).get("common_name", "Unknown")
-        cert_id = cert.get("certificate_id", "N/A")
-            
-        try:
-            # Mock risk calculation
-            days_until_expiry = (datetime.fromisoformat(expiry_str.replace("Z", "")) - datetime.utcnow()).days
-            
-            # Mock data for missing fields in this projection context
-            key_strength = 2048 
-            auto_renewal = random.choice([True, False])
-            
-            auto_renewal_factor = 0.3 if auto_renewal else 0.7
-            
-            risk_score = min(10, max(0, 
-                (1.0 - (days_until_expiry / 365)) * 7 + 
-                (1.0 - (key_strength / 4096)) * 1.5 + 
-                auto_renewal_factor + 
-                random.uniform(-1, 1)
-            ))
-            
-            predictions.append({
-                "certificate_id": cert_id,
-                "name": name,
-                "expiry_date": expiry_str,
-                "days_remaining": days_until_expiry,
-                "risk_score": round(risk_score, 1),
-                "risk_category": "High" if risk_score > 7 else "Medium" if risk_score > 4 else "Low",
-                "recommendations": get_mock_recommendations(risk_score, {"auto_renewal": auto_renewal, "key_strength": key_strength})
-            })
-        except ValueError:
-            continue
+        # Risk calculation combines days until expiry, key strength, auto-renewal status
+        risk_score = min(10, max(0, 
+            (1.0 - (days_until_expiry / 365)) * 7 +  # Time factor
+            (1.0 - (cert["key_strength"] / 4096)) * 1.5 +  # Key strength factor
+            auto_renewal_factor +  # Auto-renewal factor
+            random.uniform(-1, 1)  # Add some randomness
+        ))
+        
+        predictions.append({
+            "certificate_id": cert["certificate_id"],
+            "name": cert["name"],
+            "expiry_date": cert["expiry_date"],
+            "days_remaining": days_until_expiry,
+            "risk_score": round(risk_score, 1),
+            "risk_category": "High" if risk_score > 7 else "Medium" if risk_score > 4 else "Low",
+            "recommendations": get_mock_recommendations(risk_score, cert)
+        })
     
+    # Sort by risk score (highest first)
     predictions.sort(key=lambda x: x["risk_score"], reverse=True)
     return {"predictions": predictions}
 
 @app.get("/api/ml/anomalies")
 def detect_anomalies():
-    """
-    Optimized: Uses $sample to get random docs efficiently.
-    """
-    # Fetch 50 random docs to check for "anomalies"
-    pipeline = [
-        {"$sample": {"size": 50}},
-        {"$project": BASIC_CERT_PROJECTION}
-    ]
-    certificates = list(certificates_collection.aggregate(pipeline))
+    """Mock endpoint that simulates ML anomaly detection"""
+    certificates = list(certificates_collection.find({}, {"_id": 0}))
     anomalies = []
     
     # Simulate finding a few anomalies
     for i in range(min(5, len(certificates))):
         cert = random.choice(certificates)
-        
-        parsed = cert.get("parsed", {})
-        name = cert.get("name") or parsed.get("subject", {}).get("common_name", "Unknown")
-        department = parsed.get("issuer", {}).get("organization", "Unknown")
+        cert["issue_date"] = cert["issue_date"].isoformat()
+        cert["expiry_date"] = cert["expiry_date"].isoformat()
         
         anomaly_type = random.choice([
             "Unusually short validity period",
@@ -332,21 +259,23 @@ def detect_anomalies():
         confidence = round(random.uniform(0.65, 0.98), 2)
         
         anomalies.append({
-            "certificate_id": cert.get("certificate_id", "N/A"),
-            "name": name,
-            "type": parsed.get("signature_algorithm", {}).get("name", "Unknown"),
-            "department": department,
+            "certificate_id": cert["certificate_id"],
+            "name": cert["name"],
+            "type": cert["type"],
+            "department": cert["department"],
             "anomaly_type": anomaly_type,
             "confidence": confidence,
             "recommendation": get_anomaly_recommendation(anomaly_type, cert)
         })
     
+    # Sort by confidence (highest first)
     anomalies.sort(key=lambda x: x["confidence"], reverse=True)
     return {"anomalies": anomalies}
 
 # Helper functions for mock recommendations
 def get_mock_recommendations(risk_score, cert):
     recommendations = []
+    
     if risk_score > 7:
         recommendations.append("Immediate action required: Certificate expiring soon")
         recommendations.append("Schedule renewal within the next 7 days")
@@ -358,8 +287,10 @@ def get_mock_recommendations(risk_score, cert):
     
     if not cert["auto_renewal"]:
         recommendations.append("Enable auto-renewal to reduce future risk")
+    
     if cert["key_strength"] < 3072:
         recommendations.append("Consider upgrading key strength on next renewal")
+    
     return recommendations
 
 def get_anomaly_recommendation(anomaly_type, cert):
@@ -380,6 +311,7 @@ def get_anomaly_recommendation(anomaly_type, cert):
 
 @app.get("/api/validity-distribution")
 def get_validity_distribution():
+    """Endpoint that returns the distribution of certificate validity periods"""
     valid_periods = list(certificates_collection.aggregate([
         {
             "$project": {
@@ -389,7 +321,7 @@ def get_validity_distribution():
                             {"$toDate": "$parsed.validity.end"},
                             {"$toDate": "$parsed.validity.start"}
                         ]},
-                        1000 * 60 * 60 * 24 
+                        1000 * 60 * 60 * 24  # Convert milliseconds to days
                     ]
                 }
             }
@@ -399,31 +331,30 @@ def get_validity_distribution():
                 "groupBy": "$validity_days",
                 "boundaries": [0, 30, 90, 180, 365, 730, 1095, 1825, 3650],
                 "default": "3650+",
-                "output": {"count": {"$sum": 1}}
+                "output": {
+                    "count": {"$sum": 1}
+                }
             }
         }
     ]))
     
-    # Helper to safely find counts
-    def get_count(key):
-        return next((item["count"] for item in valid_periods if item["_id"] == key), 0)
-
     return {
         "validity_periods": [
-            {"range": "< 30 days", "count": get_count(0)},
-            {"range": "30-90 days", "count": get_count(30)},
-            {"range": "90-180 days", "count": get_count(90)},
-            {"range": "180-365 days", "count": get_count(180)},
-            {"range": "1-2 years", "count": get_count(365)},
-            {"range": "2-3 years", "count": get_count(730)},
-            {"range": "3-5 years", "count": get_count(1095)},
-            {"range": "5-10 years", "count": get_count(1825)},
-            {"range": "> 10 years", "count": get_count("3650+")}
+            {"range": "< 30 days", "count": next((item["count"] for item in valid_periods if item["_id"] == 0), 0)},
+            {"range": "30-90 days", "count": next((item["count"] for item in valid_periods if item["_id"] == 30), 0)},
+            {"range": "90-180 days", "count": next((item["count"] for item in valid_periods if item["_id"] == 90), 0)},
+            {"range": "180-365 days", "count": next((item["count"] for item in valid_periods if item["_id"] == 180), 0)},
+            {"range": "1-2 years", "count": next((item["count"] for item in valid_periods if item["_id"] == 365), 0)},
+            {"range": "2-3 years", "count": next((item["count"] for item in valid_periods if item["_id"] == 730), 0)},
+            {"range": "3-5 years", "count": next((item["count"] for item in valid_periods if item["_id"] == 1095), 0)},
+            {"range": "5-10 years", "count": next((item["count"] for item in valid_periods if item["_id"] == 1825), 0)},
+            {"range": "> 10 years", "count": next((item["count"] for item in valid_periods if item["_id"] == "3650+"), 0)}
         ]
     }
 
 @app.get("/api/hash-algorithms")
 def get_hash_algorithms():
+    """Endpoint that returns the distribution of hash algorithms used in certificates"""
     hash_algorithms = list(certificates_collection.aggregate([
         {"$group": {"_id": "$parsed.signature_algorithm.hash_algorithm", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}}
@@ -432,6 +363,7 @@ def get_hash_algorithms():
 
 @app.get("/api/signature-algorithms")
 def get_signature_algorithms():
+    """Endpoint that returns the distribution of signature algorithms used in certificates"""
     sig_algorithms = list(certificates_collection.aggregate([
         {"$group": {"_id": "$parsed.signature_algorithm.name", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}}
@@ -440,6 +372,7 @@ def get_signature_algorithms():
 
 @app.get("/api/certificate-authorities")
 def get_certificate_authorities():
+    """Endpoint that returns the distribution of root certificate authorities"""
     cas = list(certificates_collection.aggregate([
         {"$group": {"_id": "$parsed.issuer.common_name", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}}
@@ -448,6 +381,7 @@ def get_certificate_authorities():
 
 @app.get("/api/intermediate-cas")
 def get_intermediate_cas():
+    """Endpoint that returns the distribution of intermediate certificate authorities"""
     try:
         intermediate_cas = list(certificates_collection.aggregate([
             {
@@ -464,12 +398,15 @@ def get_intermediate_cas():
         ]))
 
         return {"intermediate_cas": intermediate_cas}
+
     except Exception as e:
         print("❌ Error:", e)
         raise HTTPException(status_code=500, detail=f"Error computing intermediate CAs: {e}")
 
+
 @app.get("/api/san-distribution")
 def get_san_distribution():
+    """Endpoint that returns the distribution of Subject Alternative Names (SAN) counts"""
     san_counts = list(certificates_collection.aggregate([
         {
             "$project": {
@@ -481,30 +418,30 @@ def get_san_distribution():
                 "groupBy": "$san_count",
                 "boundaries": [0, 1, 2, 3, 5, 10, 20, 50, 100],
                 "default": "100+",
-                "output": {"count": {"$sum": 1}}
+                "output": {
+                    "count": {"$sum": 1}
+                }
             }
         }
     ]))
     
-    def get_count(key):
-        return next((item["count"] for item in san_counts if item["_id"] == key), 0)
-
     return {
         "san_distribution": [
-            {"range": "0", "count": get_count(0)},
-            {"range": "1", "count": get_count(1)},
-            {"range": "2-3", "count": get_count(2)},
-            {"range": "4-5", "count": get_count(3)},
-            {"range": "5-10", "count": get_count(5)},
-            {"range": "10-20", "count": get_count(10)},
-            {"range": "20-50", "count": get_count(20)},
-            {"range": "50-100", "count": get_count(50)},
-            {"range": "> 100", "count": get_count("100+")}
+            {"range": "0", "count": next((item["count"] for item in san_counts if item["_id"] == 0), 0)},
+            {"range": "1", "count": next((item["count"] for item in san_counts if item["_id"] == 1), 0)},
+            {"range": "2-3", "count": next((item["count"] for item in san_counts if item["_id"] == 2), 0)},
+            {"range": "4-5", "count": next((item["count"] for item in san_counts if item["_id"] == 3), 0)},
+            {"range": "5-10", "count": next((item["count"] for item in san_counts if item["_id"] == 5), 0)},
+            {"range": "10-20", "count": next((item["count"] for item in san_counts if item["_id"] == 10), 0)},
+            {"range": "20-50", "count": next((item["count"] for item in san_counts if item["_id"] == 20), 0)},
+            {"range": "50-100", "count": next((item["count"] for item in san_counts if item["_id"] == 50), 0)},
+            {"range": "> 100", "count": next((item["count"] for item in san_counts if item["_id"] == "100+"), 0)}
         ]
     }
 
 @app.get("/api/san-domains")
 def get_san_domains():
+    """Endpoint that returns the most common domains in Subject Alternative Names"""
     pipeline = [
         {"$unwind": {"path": "$parsed.extensions.subject_alt_name.dns_names", "preserveNullAndEmptyArrays": False}},
         {"$group": {"_id": "$parsed.extensions.subject_alt_name.dns_names", "count": {"$sum": 1}}},
@@ -516,6 +453,7 @@ def get_san_domains():
 
 @app.get("/api/validity-trends")
 def get_validity_trends():
+    """Endpoint that returns validity period trends over time"""
     trends = list(certificates_collection.aggregate([
         {
             "$project": {
@@ -526,7 +464,7 @@ def get_validity_trends():
                             {"$toDate": "$parsed.validity.end"},
                             {"$toDate": "$parsed.validity.start"}
                         ]},
-                        1000 * 60 * 60 * 24 
+                        1000 * 60 * 60 * 24  # Convert milliseconds to days
                     ]
                 }
             }
@@ -540,43 +478,53 @@ def get_validity_trends():
         },
         {"$sort": {"_id": 1}}
     ]))
+    
     return {"validity_trends": trends}
+
 
 @app.get("/api/algorithm-trends")
 def get_algorithm_trends():
-    """
-    Optimized: Moved calculation from Python loop to MongoDB aggregation.
-    """
+    """Endpoint that returns algorithm usage trends over time"""
     try:
-        pipeline = [
-            {"$match": {
+        # Fetch only the fields we need
+        cursor = certificates_collection.find(
+            {
                 "parsed.validity.start": {"$exists": True},
                 "parsed.signature_algorithm.name": {"$exists": True}
-            }},
-            {"$project": {
-                "year": {"$year": {"$toDate": "$parsed.validity.start"}},
-                "algorithm": "$parsed.signature_algorithm.name"
-            }},
-            {"$group": {
-                "_id": {"year": "$year", "algorithm": "$algorithm"},
-                "count": {"$sum": 1}
-            }},
-            {"$sort": {"_id.year": 1}}
-        ]
-        
-        raw_trends = list(certificates_collection.aggregate(pipeline))
-        
-        # Restructure efficiently in memory
+            },
+            {
+                "_id": 0,
+                "parsed.validity.start": 1,
+                "parsed.signature_algorithm.name": 1
+            }
+        )
+
+        # Count occurrences of (year, algorithm)
+        trends = {}
+        for doc in cursor:
+            start = doc.get("parsed", {}).get("validity", {}).get("start")
+            algorithm = doc.get("parsed", {}).get("signature_algorithm", {}).get("name")
+
+            if not start or not algorithm:
+                continue
+
+            # Parse the date safely
+            try:
+                dt = datetime.fromisoformat(start.replace("Z", ""))
+            except Exception:
+                continue  # skip malformed dates
+
+            key = (dt.year, algorithm)
+            trends[key] = trends.get(key, 0) + 1
+
+        # Restructure data for frontend
         result = {}
-        for item in raw_trends:
-            year = item["_id"]["year"]
-            algo = item["_id"]["algorithm"]
-            count = item["count"]
-            
+        for (year, algorithm), count in trends.items():
             if year not in result:
                 result[year] = []
-            result[year].append({"algorithm": algo, "count": count})
+            result[year].append({"algorithm": algorithm, "count": count})
 
+        # Sort by year for cleaner output
         sorted_result = sorted(result.items())
 
         return {
@@ -584,11 +532,15 @@ def get_algorithm_trends():
                 {"year": year, "algorithms": algos} for year, algos in sorted_result
             ]
         }
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error computing algorithm trends: {e}")
 
+
+
 @app.get("/api/issuer-organization")
 def get_issuer_organization():
+    """Endpoint that returns the distribution of issuer organizations"""
     pipeline = [
         {"$unwind": {"path": "$parsed.issuer.organization", "preserveNullAndEmptyArrays": True}},
         {"$group": {"_id": "$parsed.issuer.organization", "count": {"$sum": 1}}},
@@ -599,6 +551,7 @@ def get_issuer_organization():
 
 @app.get("/api/issuer-country")
 def get_issuer_country():
+    """Endpoint that returns the distribution of issuer countries"""
     pipeline = [
         {"$unwind": {"path": "$parsed.issuer.country", "preserveNullAndEmptyArrays": True}},
         {"$group": {"_id": "$parsed.issuer.country", "count": {"$sum": 1}}},
@@ -609,17 +562,19 @@ def get_issuer_country():
 
 @app.get("/api/subject-common-names")
 def get_subject_common_names():
+    """Endpoint that returns the distribution of subject common names (owners)"""
     pipeline = [
         {"$unwind": {"path": "$parsed.subject.common_name", "preserveNullAndEmptyArrays": True}},
         {"$group": {"_id": "$parsed.subject.common_name", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}},
-        {"$limit": 50}
+        {"$limit": 50}  # Limit to top 50 to avoid overwhelming response
     ]
     common_names = list(certificates_collection.aggregate(pipeline))
     return {"subject_common_names": common_names}
 
 @app.get("/api/ca-domain-analysis")
 def get_ca_domain_analysis():
+    """Endpoint that returns analysis of CAs vs Domain Names"""
     pipeline = [
         {"$unwind": {"path": "$parsed.issuer.organization", "preserveNullAndEmptyArrays": True}},
         {"$unwind": {"path": "$parsed.extensions.subject_alt_name.dns_names", "preserveNullAndEmptyArrays": True}},
@@ -650,55 +605,65 @@ def get_ca_domain_analysis():
     ca_domains = list(certificates_collection.aggregate(pipeline))
     return {"ca_domains": ca_domains}
 
+
 @app.get("/api/ca-url-analysis")
 def get_ca_url_analysis():
-    """
-    Optimized: Uses strict projection to fetch only necessary fields.
-    Also handles list construction efficiently.
-    """
+    """Endpoint that returns analysis of CAs vs URLs"""
     try:
-        # Strict projection: Only fetch Organization and DNS Names
-        projection = {
-            "_id": 0,
-            "parsed.issuer.organization": 1,
-            "parsed.extensions.subject_alt_name.dns_names": 1
-        }
-        
+        # Only fetch the fields we actually need
         cursor = certificates_collection.find(
             {
                 "parsed.extensions.subject_alt_name.dns_names": {"$exists": True},
                 "parsed.issuer.organization": {"$exists": True}
             },
-            projection
+            {
+                "_id": 0,
+                "parsed.issuer.organization": 1,
+                "parsed.extensions.subject_alt_name.dns_names": 1
+            }
         )
 
         ca_stats = {}
 
         for doc in cursor:
-            parsed = doc.get("parsed", {})
-            issuer_org = parsed.get("issuer", {}).get("organization")
+            # Extract CA organization name
+            issuer_org = doc.get("parsed", {}).get("issuer", {}).get("organization")
 
+            # Handle cases where organization is a list or string
             if isinstance(issuer_org, list):
                 orgs = issuer_org
             elif isinstance(issuer_org, str):
                 orgs = [issuer_org]
             else:
-                continue
+                continue  # skip if malformed
 
-            dns_names = parsed.get("extensions", {}).get("subject_alt_name", {}).get("dns_names", [])
+            # Extract list of URLs (DNS names)
+            dns_names = (
+                doc.get("parsed", {})
+                   .get("extensions", {})
+                   .get("subject_alt_name", {})
+                   .get("dns_names", [])
+            )
+
             url_count = len(dns_names)
 
+            # Update counts for each CA organization
             for org in orgs:
-                if not org: continue
+                if not org:
+                    continue
                 if org not in ca_stats:
                     ca_stats[org] = {"url_count": 0, "cert_count": 0}
 
                 ca_stats[org]["url_count"] += url_count
                 ca_stats[org]["cert_count"] += 1
 
+        # Compute averages and build response
         result = []
         for ca, stats in ca_stats.items():
-            avg_urls = (stats["url_count"] / stats["cert_count"]) if stats["cert_count"] > 0 else 0
+            avg_urls = (
+                stats["url_count"] / stats["cert_count"]
+                if stats["cert_count"] > 0 else 0
+            )
             result.append({
                 "ca": ca,
                 "url_count": stats["url_count"],
@@ -706,14 +671,21 @@ def get_ca_url_analysis():
                 "avg_urls_per_cert": avg_urls
             })
 
+        # Sort by URL count descending
         result.sort(key=lambda x: x["url_count"], reverse=True)
+
         return {"ca_urls": result}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error computing CA-URL analysis: {e}")
 
+
+
+
+
 @app.get("/api/ca-pubkey-analysis")
 def get_ca_pubkey_analysis():
+    """Endpoint that returns analysis of CAs vs Public Keys (looking for duplications)"""
     pipeline = [
         {"$unwind": {"path": "$parsed.issuer.organization", "preserveNullAndEmptyArrays": True}},
         {
@@ -726,7 +698,7 @@ def get_ca_pubkey_analysis():
                 "domains": {"$push": {"$arrayElemAt": ["$parsed.subject.common_name", 0]}},
             }
         },
-        {"$match": {"count": {"$gt": 1}}},
+        {"$match": {"count": {"$gt": 1}}},  # Only include duplicated keys
         {"$sort": {"count": -1}},
         {
             "$group": {
@@ -748,6 +720,7 @@ def get_ca_pubkey_analysis():
 
 @app.get("/api/shared-pubkeys")
 def get_shared_pubkeys():
+    """Endpoint that returns analysis of shared public keys across certificates"""
     pipeline = [
         {
             "$group": {
@@ -764,13 +737,14 @@ def get_shared_pubkeys():
                 }}
             }
         },
-        {"$match": {"count": {"$gt": 1}}},
+        {"$match": {"count": {"$gt": 1}}},  # Only include shared keys
         {"$sort": {"count": -1}},
-        {"$limit": 100}
+        {"$limit": 100}  # Limit to top 100 to avoid overwhelming response
     ]
     shared_pubkeys = list(certificates_collection.aggregate(pipeline))
     return {"shared_pubkeys": shared_pubkeys}
 
+# Shutdown MongoDB connection on app shutdown
 @app.on_event("shutdown")
 def shutdown_db_client():
     client.close()

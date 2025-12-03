@@ -7,3 +7,4 @@ frontend__/*md
 *.pyc
 *.log
 mongo.txt
+summary.txt
